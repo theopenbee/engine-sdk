@@ -189,6 +189,19 @@ test("duration is left out when a timestamp is missing or invalid", () => {
   }
 });
 
+test("fractional timestamps give an integer duration", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "command", name: "Bash" }, 1000.2);
+  b.toolEnd("a", {}, 1002.1);
+  b.toolStart("b", { kind: "command", name: "Bash" }, 10);
+  b.toolEnd("b", {}, 11.5);
+  const [a, c] = b.steps();
+  assert.equal(a.duration_ms, 2);
+  assert.equal(c.duration_ms, 2);
+  assert.ok(Number.isInteger(a.duration_ms));
+  assert.ok(Number.isInteger(c.duration_ms));
+});
+
 test("a zero duration is kept", () => {
   const b = new TranscriptBuilder();
   b.toolStart("a", { kind: "command", name: "Bash" }, 1000);

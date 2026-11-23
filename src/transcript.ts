@@ -87,7 +87,7 @@ export class TranscriptBuilder {
     }
     const start = running.at;
     if (typeof start === "number" && typeof at === "number" && Number.isFinite(start) && Number.isFinite(at) && at >= start) {
-      step.duration_ms = at - start;
+      step.duration_ms = Math.round(at - start);
     }
   }
 
