@@ -19,7 +19,7 @@ await runEngine({
     }
     if (prompt === "context") {
       const { params, ...rest } = req;
-      return { text: JSON.stringify({ ...rest, role: params.role, work_dir: params.work_dir, resume: params.resume, extra_args: params.extra_args, mcp: params.mcp }) };
+      return { text: JSON.stringify({ ...rest, role: params.role, work_dir: params.work_dir, resume: params.resume, extra_args: params.extra_args, model: params.model, mcp: params.mcp }) };
     }
     if (prompt === "pgid") {
       const seen = [];
@@ -44,5 +44,9 @@ await runEngine({
       out[id] = [{ model: "m-" + id, input_tokens: 1, output_tokens: 2, cache_creation_tokens: 3, cache_read_tokens: 4 }];
     }
     return out;
+  },
+  async models(req) {
+    if (req.config.models === "boom") throw new Error("listing failed");
+    return [{ id: "fake/large", name: "Fake Large" }, { id: "fake/small" }];
   },
 });

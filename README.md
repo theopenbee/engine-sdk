@@ -30,7 +30,7 @@ Request (protocol version `1`):
 
 | Field | Description |
 |---|---|
-| `method` | `check`, `run` or `usage` |
+| `method` | `check`, `run`, `usage` or `models` |
 | `config` | The plugin's configuration as set by the user (for example `path`) |
 | `data_dir` | Private directory for the plugin, deleted when the plugin is uninstalled |
 | `state_dir` | Directory for state that must survive an uninstall; openbee never deletes it |
@@ -48,10 +48,11 @@ Response, exactly one line:
 | Method | `params` | `result` |
 |---|---|---|
 | `check` | `{}` | `{ version, path }` |
-| `run` | `{ role, work_dir, prompt, session_id, resume, extra_args, log_path, mcp? }` | `{ text, error? }` |
+| `run` | `{ role, work_dir, prompt, session_id, resume, extra_args, log_path, model?, mcp? }` | `{ text, error? }` |
 | `usage` | `{ session_ids }` | `{ usage: { <session_id>: TokenUsage[] } }` |
+| `models` | `{}` | `{ models: ModelInfo[] }` |
 
-`mcp` is `{ name, url, api_key_env }`: the MCP server the CLI should use and the name of the environment variable that holds its API key. `check` must finish within 30 seconds and `usage` within 60 seconds; `run` is only bounded by openbee stopping the task.
+`model` is the worker's model for this engine; openbee leaves it out when none is set, and the engine then uses its own default. `mcp` is `{ name, url, api_key_env }`: the MCP server the CLI should use and the name of the environment variable that holds its API key. `models` lists the models openbee suggests for a worker; `id` is what openbee later sends as `model`. openbee runs it with the Env settings but without `OPENBEE_API_KEY`, so provider keys set there are visible. `check` and `models` must finish within 30 seconds and `usage` within 60 seconds; `run` is only bounded by openbee stopping the task.
 
 ## The Engine interface
 
@@ -60,6 +61,7 @@ interface Engine {
   check(req: EngineRequest<Record<string, never>>): Promise<CheckResult>;
   run(req: EngineRequest<RunParams>): Promise<RunResult>;
   usage(req: EngineRequest<{ session_ids: string[] }>): Promise<Record<string, TokenUsage[]>>;
+  models?(req: EngineRequest<Record<string, never>>): Promise<ModelInfo[]>;
 }
 
 interface CheckResult { version: string; path: string }
@@ -71,9 +73,10 @@ interface TokenUsage {
   cache_creation_tokens: number;
   cache_read_tokens: number;
 }
+interface ModelInfo { id: string; name?: string }
 ```
 
-`runEngine(engine)` reads the request, dispatches on `method` and writes the response. `usage` returns a map from session id to its token usage; `runEngine` wraps it as `{ "usage": ... }` for you.
+`runEngine(engine)` reads the request, dispatches on `method` and writes the response. `usage` returns a map from session id to its token usage; `runEngine` wraps it as `{ "usage": ... }` for you. `models` is optional and returns the model list, wrapped as `{ "models": ... }`; an engine without it answers `{ "models": [] }`.
 
 ## Minimal plugin
 
@@ -87,12 +90,12 @@ runEngine({
   },
 
   async run(req) {
-    const { work_dir, prompt, extra_args, log_path } = req.params;
+    const { work_dir, prompt, extra_args, log_path, model } = req.params;
     const command = findCli(req.config, "mycli");
     let text = "";
     const res = await spawnCli({
       command,
-      args: ["--print", ...extra_args],
+      args: ["--print", ...(model ? ["--model", model] : []), ...extra_args],
       cwd: work_dir,
       input: prompt,
       logPath: log_path,

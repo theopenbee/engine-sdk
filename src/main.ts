@@ -75,6 +75,8 @@ async function dispatch(engine: Engine, req: EngineRequest<unknown>): Promise<un
       return engine.run(req as EngineRequest<RunParams>);
     case "usage":
       return { usage: await engine.usage(req as EngineRequest<{ session_ids: string[] }>) };
+    case "models":
+      return { models: engine.models ? await engine.models(req as EngineRequest<Record<string, never>>) : [] };
     default:
       throw new Error(`unknown method "${String(req.method)}"`);
   }

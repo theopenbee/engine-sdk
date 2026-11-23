@@ -1,6 +1,6 @@
 export interface EngineRequest<P> {
   protocol_version: number;
-  method: "run" | "check" | "usage";
+  method: "run" | "check" | "usage" | "models";
   openbee_version: string;
   engine_id: string;
   language: string;
@@ -18,6 +18,7 @@ export interface RunParams {
   resume: boolean;
   extra_args: string[];
   log_path: string;
+  model?: string;
   mcp?: { name: string; url: string; api_key_env: string };
 }
 
@@ -39,8 +40,14 @@ export interface TokenUsage {
   cache_read_tokens: number;
 }
 
+export interface ModelInfo {
+  id: string;
+  name?: string;
+}
+
 export interface Engine {
   check(req: EngineRequest<Record<string, never>>): Promise<CheckResult>;
   run(req: EngineRequest<RunParams>): Promise<RunResult>;
   usage(req: EngineRequest<{ session_ids: string[] }>): Promise<Record<string, TokenUsage[]>>;
+  models?(req: EngineRequest<Record<string, never>>): Promise<ModelInfo[]>;
 }

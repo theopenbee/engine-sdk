@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "engine.mjs");
+const noModelsFixture = join(here, "fixtures", "no-models.mjs");
 const scratch = mkdtempSync(join(tmpdir(), "engine-sdk-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -43,9 +44,9 @@ function baseRequest(method, params) {
   };
 }
 
-function runPlugin(runtime, input) {
+function runPlugin(runtime, input, script = fixture) {
   return new Promise((resolve, reject) => {
-    const child = spawn(runtime.command, [fixture], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(runtime.command, [script], { stdio: ["pipe", "pipe", "pipe"] });
     const out = [];
     const err = [];
     child.stdout.on("data", (d) => out.push(d));
@@ -88,6 +89,7 @@ for (const runtime of runtimes) {
       resume: true,
       extra_args: ["--a", "b"],
       log_path: join(scratch, "run.log"),
+      model: "fake/large",
       mcp: { name: "openbee", url: "http://127.0.0.1:1/mcp", api_key_env: "OPENBEE_TOKEN" },
     };
     const res = singleResponse(await runPlugin(runtime, baseRequest("run", params)));
@@ -105,6 +107,7 @@ for (const runtime of runtimes) {
       work_dir: "/tmp/work",
       resume: true,
       extra_args: ["--a", "b"],
+      model: "fake/large",
       mcp: params.mcp,
     });
   });
@@ -124,6 +127,26 @@ for (const runtime of runtimes) {
         },
       },
     });
+  });
+
+  t("models wraps the list in a models key", async () => {
+    const res = singleResponse(await runPlugin(runtime, baseRequest("models", {})));
+    assert.deepEqual(res, { result: { models: [{ id: "fake/large", name: "Fake Large" }, { id: "fake/small" }] } });
+  });
+
+  t("models failure becomes an error response", async () => {
+    const res = singleResponse(await runPlugin(runtime, { ...baseRequest("models", {}), config: { models: "boom" } }));
+    assert.deepEqual(res, { error: { message: "listing failed" } });
+  });
+
+  t("models returns an empty list when the engine does not list models", async () => {
+    const res = singleResponse(await runPlugin(runtime, baseRequest("models", {}), noModelsFixture));
+    assert.deepEqual(res, { result: { models: [] } });
+  });
+
+  t("an engine without models still answers the other methods", async () => {
+    const res = singleResponse(await runPlugin(runtime, baseRequest("check", {}), noModelsFixture));
+    assert.deepEqual(res, { result: { version: "1.0.0", path: "/usr/local/bin/legacy" } });
   });
 
   t("large unicode prompt survives byte for byte", async () => {
