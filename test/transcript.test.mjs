@@ -167,6 +167,83 @@ test("output of 4001 characters is clipped to exactly 4000", () => {
   assert.equal(clipped, "a".repeat(1000) + "\n…\n" + "c".repeat(2997));
 });
 
+test("toolStart stores a diff on the tool step", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "Edit", summary: "a.txt", diff: "-old\n+new" });
+  assert.deepEqual(b.steps(), [{ type: "tool", kind: "edit", name: "Edit", summary: "a.txt", diff: "-old\n+new", status: "running" }]);
+});
+
+test("a tool step without a diff has no diff field", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "Edit" });
+  b.toolStart("b", { kind: "edit", name: "Edit", diff: "" });
+  b.toolStart("c", { kind: "edit", name: "Edit", diff: "  \n\n" });
+  for (const step of b.steps()) {
+    assert.equal("diff" in step, false);
+  }
+});
+
+test("diff longer than 4000 characters keeps the head and the tail", () => {
+  const head = "+" + "h".repeat(999);
+  const tail = "-" + "t".repeat(2996);
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "Edit", diff: head + "m".repeat(5000) + tail });
+  const diff = b.steps()[0].diff;
+  assert.equal(diff.length, 4000);
+  assert.equal(diff, head + "\n…\n" + tail);
+});
+
+test("diff of exactly 4000 characters is kept", () => {
+  const diff = "+" + "d".repeat(3999);
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "Edit", diff });
+  assert.equal(b.steps()[0].diff, diff);
+});
+
+test("diff keeps its leading markers and survives toolEnd", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "Edit", diff: " keep\n-old\n+new\n\n" });
+  b.toolEnd("a", { output: "ok" });
+  const [step] = b.steps();
+  assert.equal(step.diff, " keep\n-old\n+new");
+  assert.equal(step.output, "ok");
+  assert.equal(step.status, "done");
+});
+
+test("toolEnd diff replaces the diff given at toolStart", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "edit", diff: "-old\n+new" });
+  b.toolEnd("a", { output: "ok", diff: " ctx\n-before\n+after" });
+  assert.equal(b.steps()[0].diff, " ctx\n-before\n+after");
+});
+
+test("toolEnd diff sets the diff of a tool that started without one", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "edit" });
+  b.toolEnd("a", { diff: "+added" });
+  assert.equal(b.steps()[0].diff, "+added");
+});
+
+test("a blank toolEnd diff keeps the diff from toolStart", () => {
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "edit", diff: "-old\n+new" });
+  b.toolStart("b", { kind: "edit", name: "edit" });
+  b.toolEnd("a", { diff: "  \n" });
+  b.toolEnd("b", { diff: "" });
+  const [a, other] = b.steps();
+  assert.equal(a.diff, "-old\n+new");
+  assert.equal("diff" in other, false);
+});
+
+test("toolEnd diff is clipped like output", () => {
+  const head = "+" + "h".repeat(999);
+  const tail = "-" + "t".repeat(2996);
+  const b = new TranscriptBuilder();
+  b.toolStart("a", { kind: "edit", name: "edit" });
+  b.toolEnd("a", { diff: head + "m".repeat(5000) + tail });
+  assert.equal(b.steps()[0].diff, head + "\n…\n" + tail);
+});
+
 test("duration comes from the start and end timestamps", () => {
   const b = new TranscriptBuilder();
   b.toolStart("a", { kind: "command", name: "Bash" }, 1000);

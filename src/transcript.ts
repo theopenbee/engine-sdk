@@ -64,17 +64,21 @@ export class TranscriptBuilder {
     this.list.push({ type: "error", text: clipText(t) });
   }
 
-  toolStart(id: string, tool: { kind: ToolKind; name: string; summary?: string }, at?: number): void {
+  toolStart(id: string, tool: { kind: ToolKind; name: string; summary?: string; diff?: string }, at?: number): void {
     const step: ToolStep = { type: "tool", kind: tool.kind, name: tool.name, status: "running" };
     const summary = tool.summary === undefined ? "" : clipSummary(tool.summary);
     if (summary !== "") {
       step.summary = summary;
     }
+    const diff = tool.diff === undefined ? "" : clipOutput(tool.diff);
+    if (diff.trim() !== "") {
+      step.diff = diff;
+    }
     this.list.push(step);
     this.tools.set(id, { step, at });
   }
 
-  toolEnd(id: string, result: { output?: string; isError?: boolean }, at?: number): void {
+  toolEnd(id: string, result: { output?: string; isError?: boolean; diff?: string }, at?: number): void {
     const running = this.tools.get(id);
     if (!running) {
       return;
@@ -84,6 +88,10 @@ export class TranscriptBuilder {
     const output = result.output === undefined ? "" : clipOutput(result.output);
     if (output !== "") {
       step.output = output;
+    }
+    const diff = result.diff === undefined ? "" : clipOutput(result.diff);
+    if (diff.trim() !== "") {
+      step.diff = diff;
     }
     const start = running.at;
     if (typeof start === "number" && typeof at === "number" && Number.isFinite(start) && Number.isFinite(at) && at >= start) {

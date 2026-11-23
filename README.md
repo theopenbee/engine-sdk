@@ -85,6 +85,7 @@ type TranscriptStep =
       kind: ToolKind;
       name: string;
       summary?: string;
+      diff?: string;
       output?: string;
       status: "running" | "done" | "error";
       duration_ms?: number;
@@ -101,7 +102,7 @@ type TranscriptStep =
 |---|---|
 | `text` | `text`: assistant reply text; consecutive text merges with a blank line |
 | `thinking` | `text`: non-empty reasoning only |
-| `tool` | `kind` (`command`, `read`, `edit`, `search`, `web`, `message` or `other`), `name` (tool name without the `mcp__<server>__` prefix), `summary` (one line, at most 300 characters), `output` (at most 4000 characters: the first 1000, `\n…\n`, then the last 2997 when longer), `status` (`running`, `done` or `error`), `duration_ms` (only when both timestamps are known) |
+| `tool` | `kind` (`command`, `read`, `edit`, `search`, `web`, `message` or `other`), `name` (tool name without the `mcp__<server>__` prefix), `summary` (one line, at most 300 characters), `diff` (optional, for tools that change a file: one line per changed line, each starting with `+`, `-` or a space, joined with `\n`, no headers; clipped like `output`), `output` (at most 4000 characters: the first 1000, `\n…\n`, then the last 2997 when longer), `status` (`running`, `done` or `error`), `duration_ms` (only when both timestamps are known) |
 | `error` | `text` |
 
 `text` is at most 20000 characters. Skip lines that are not JSON (the log also holds stderr), skip a truncated last line, and skip events of nested sub-agents. `message` is the openbee `send_message` tool; its `summary` is the message content. A tool that has no result yet stays `running`.
@@ -171,7 +172,7 @@ runEngine({
 | `cliVersion(path, args?)` | Runs `<path> --version` (or `args`) with a 10 second timeout and returns the trimmed first line. |
 | `execCli(path, args, options, callback)` | `execFile` for a CLI found with `findCli`: same options and callback, with stdout and stderr as strings. Use it for every other CLI call, such as listing models or reading usage. |
 | `resolveCli(path)` | The command and leading arguments that start `path`. `spawnCli`, `cliVersion` and `execCli` use it, so plugins rarely need it. |
-| `TranscriptBuilder` | Collects transcript steps. `text`, `thinking` and `error` add steps (blank `text` and `thinking` are ignored and consecutive `text` merges); `toolStart(id, { kind, name, summary? }, at?)` adds a running tool; `toolEnd(id, { output?, isError? }, at?)` finishes it (an unknown `id` is ignored) and sets `duration_ms` from the two `at` timestamps in milliseconds; `steps()` returns the steps with every limit applied. |
+| `TranscriptBuilder` | Collects transcript steps. `text`, `thinking` and `error` add steps (blank `text` and `thinking` are ignored and consecutive `text` merges); `toolStart(id, { kind, name, summary?, diff? }, at?)` adds a running tool; `toolEnd(id, { output?, isError?, diff? }, at?)` finishes it (an unknown `id` is ignored; a non-blank `diff` replaces the one from `toolStart`) and sets `duration_ms` from the two `at` timestamps in milliseconds; `steps()` returns the steps with every limit applied. |
 | `readJsonLines(path)` | Reads a log file and returns its JSON objects. Blank lines, lines that are not JSON, lines that are not objects and a truncated last line are skipped; a missing file gives `[]`. |
 | `stripMcpPrefix(name)` | Removes the `mcp__<server>__` prefix: `mcp__openbee__send_message` becomes `send_message`. |
 | `log.info/warn/error(msg)` | Writes a line to stderr. |

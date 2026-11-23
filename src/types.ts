@@ -54,6 +54,7 @@ export type TranscriptStep =
       kind: ToolKind;
       name: string;
       summary?: string;
+      diff?: string;
       output?: string;
       status: "running" | "done" | "error";
       duration_ms?: number;
