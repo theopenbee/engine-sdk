@@ -1,6 +1,6 @@
 import { format } from "node:util";
 
-import type { Engine, EngineRequest, RunParams } from "./types.js";
+import type { Engine, EngineRequest, RunParams, TranscriptParams } from "./types.js";
 
 const PROTOCOL_VERSION = 1;
 
@@ -77,6 +77,11 @@ async function dispatch(engine: Engine, req: EngineRequest<unknown>): Promise<un
       return { usage: await engine.usage(req as EngineRequest<{ session_ids: string[] }>) };
     case "models":
       return { models: engine.models ? await engine.models(req as EngineRequest<Record<string, never>>) : [] };
+    case "transcript":
+      if (!engine.transcript) {
+        throw new Error(`unknown method "${req.method}"`);
+      }
+      return { steps: await engine.transcript(req as EngineRequest<TranscriptParams>) };
     default:
       throw new Error(`unknown method "${String(req.method)}"`);
   }

@@ -30,7 +30,7 @@ Request (protocol version `1`):
 
 | Field | Description |
 |---|---|
-| `method` | `check`, `run`, `usage` or `models` |
+| `method` | `check`, `run`, `usage`, `models` or `transcript` |
 | `config` | The plugin's configuration as set by the user (for example `path`) |
 | `data_dir` | Private directory for the plugin, deleted when the plugin is uninstalled |
 | `state_dir` | Directory for state that must survive an uninstall; openbee never deletes it |
@@ -51,8 +51,9 @@ Response, exactly one line:
 | `run` | `{ role, work_dir, prompt, session_id, resume, extra_args, log_path, model?, mcp? }` | `{ text, error? }` |
 | `usage` | `{ session_ids }` | `{ usage: { <session_id>: TokenUsage[] } }` |
 | `models` | `{}` | `{ models: ModelInfo[] }` |
+| `transcript` | `{ log_path }` | `{ steps: TranscriptStep[] }` |
 
-`model` is the worker's model for this engine; openbee leaves it out when none is set, and the engine then uses its own default. `mcp` is `{ name, url, api_key_env }`: the MCP server the CLI should use and the name of the environment variable that holds its API key. `models` lists the models openbee suggests for a worker; `id` is what openbee later sends as `model`. openbee runs it with the Env settings but without `OPENBEE_API_KEY`, so provider keys set there are visible. `check` and `models` must finish within 30 seconds and `usage` within 60 seconds; `run` is only bounded by openbee stopping the task.
+`model` is the worker's model for this engine; openbee leaves it out when none is set, and the engine then uses its own default. `mcp` is `{ name, url, api_key_env }`: the MCP server the CLI should use and the name of the environment variable that holds its API key. `models` lists the models openbee suggests for a worker; `id` is what openbee later sends as `model`. openbee runs it with the Env settings but without `OPENBEE_API_KEY`, so provider keys set there are visible. `check`, `models` and `transcript` must finish within 30 seconds and `usage` within 60 seconds; `run` is only bounded by openbee stopping the task.
 
 ## The Engine interface
 
@@ -62,6 +63,7 @@ interface Engine {
   run(req: EngineRequest<RunParams>): Promise<RunResult>;
   usage(req: EngineRequest<{ session_ids: string[] }>): Promise<Record<string, TokenUsage[]>>;
   models?(req: EngineRequest<Record<string, never>>): Promise<ModelInfo[]>;
+  transcript?(req: EngineRequest<TranscriptParams>): Promise<TranscriptStep[]>;
 }
 
 interface CheckResult { version: string; path: string }
@@ -74,9 +76,53 @@ interface TokenUsage {
   cache_read_tokens: number;
 }
 interface ModelInfo { id: string; name?: string }
+interface TranscriptParams { log_path: string }
+type ToolKind = "command" | "read" | "edit" | "search" | "web" | "message" | "other";
+type TranscriptStep =
+  | { type: "text" | "thinking" | "error"; text: string }
+  | {
+      type: "tool";
+      kind: ToolKind;
+      name: string;
+      summary?: string;
+      output?: string;
+      status: "running" | "done" | "error";
+      duration_ms?: number;
+    };
 ```
 
 `runEngine(engine)` reads the request, dispatches on `method` and writes the response. `usage` returns a map from session id to its token usage; `runEngine` wraps it as `{ "usage": ... }` for you. `models` is optional and returns the model list, wrapped as `{ "models": ... }`; an engine without it answers `{ "models": [] }`.
+
+## Transcript
+
+`transcript` is optional. openbee calls it to show what a finished or running task did: the engine reads the log file `run` wrote to `log_path` and returns the steps in order, oldest first. `runEngine` wraps the result as `{ "steps": ... }`; an engine without `transcript` answers `unknown method "transcript"`, which openbee treats as "no transcript available".
+
+| Step | Fields |
+|---|---|
+| `text` | `text`: assistant reply text; consecutive text merges with a blank line |
+| `thinking` | `text`: non-empty reasoning only |
+| `tool` | `kind` (`command`, `read`, `edit`, `search`, `web`, `message` or `other`), `name` (tool name without the `mcp__<server>__` prefix), `summary` (one line, at most 300 characters), `output` (at most 4000 characters: the first 1000, `\n…\n`, then the last 2999 when longer), `status` (`running`, `done` or `error`), `duration_ms` (only when both timestamps are known) |
+| `error` | `text` |
+
+`text` is at most 20000 characters. Skip lines that are not JSON (the log also holds stderr), skip a truncated last line, and skip events of nested sub-agents. `message` is the openbee `send_message` tool; its `summary` is the message content. A tool that has no result yet stays `running`.
+
+`TranscriptBuilder` applies all of these limits, so an engine only translates its own log format:
+
+```js
+import { TranscriptBuilder, readJsonLines, stripMcpPrefix } from "@theopenbee/engine-sdk";
+
+async transcript(req) {
+  const builder = new TranscriptBuilder();
+  for (const event of readJsonLines(req.params.log_path)) {
+    if (event.type === "assistant_text") builder.text(event.text);
+    if (event.type === "tool_call") {
+      builder.toolStart(event.id, { kind: "command", name: stripMcpPrefix(event.name), summary: event.input }, event.at);
+    }
+    if (event.type === "tool_result") builder.toolEnd(event.id, { output: event.output, isError: event.failed }, event.at);
+  }
+  return builder.steps();
+}
+```
 
 ## Minimal plugin
 
@@ -125,6 +171,9 @@ runEngine({
 | `cliVersion(path, args?)` | Runs `<path> --version` (or `args`) with a 10 second timeout and returns the trimmed first line. |
 | `execCli(path, args, options, callback)` | `execFile` for a CLI found with `findCli`: same options and callback, with stdout and stderr as strings. Use it for every other CLI call, such as listing models or reading usage. |
 | `resolveCli(path)` | The command and leading arguments that start `path`. `spawnCli`, `cliVersion` and `execCli` use it, so plugins rarely need it. |
+| `TranscriptBuilder` | Collects transcript steps. `text`, `thinking` and `error` add steps (blank `text` and `thinking` are ignored and consecutive `text` merges); `toolStart(id, { kind, name, summary? }, at?)` adds a running tool; `toolEnd(id, { output?, isError? }, at?)` finishes it (an unknown `id` is ignored) and sets `duration_ms` from the two `at` timestamps in milliseconds; `steps()` returns the steps with every limit applied. |
+| `readJsonLines(path)` | Reads a log file and returns its JSON objects. Blank lines, lines that are not JSON, lines that are not objects and a truncated last line are skipped; a missing file gives `[]`. |
+| `stripMcpPrefix(name)` | Removes the `mcp__<server>__` prefix: `mcp__openbee__send_message` becomes `send_message`. |
 | `log.info/warn/error(msg)` | Writes a line to stderr. |
 
 ## Process rules

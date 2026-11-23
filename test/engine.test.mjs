@@ -1,7 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,6 +147,46 @@ for (const runtime of runtimes) {
   t("an engine without models still answers the other methods", async () => {
     const res = singleResponse(await runPlugin(runtime, baseRequest("check", {}), noModelsFixture));
     assert.deepEqual(res, { result: { version: "1.0.0", path: "/usr/local/bin/legacy" } });
+  });
+
+  t("transcript wraps the steps in a steps key", async () => {
+    const logPath = join(scratch, "transcript.log");
+    const lines = [
+      { kind: "text", text: "looking" },
+      { kind: "start", id: "t1", tool: "command", name: "Bash", summary: "ls\n -la", at: 1000 },
+      "stderr noise",
+      { kind: "end", id: "t1", output: "total 0\n", at: 1750 },
+      { kind: "start", id: "t2", tool: "message", name: "mcp__openbee__send_message", summary: "hi" },
+      { kind: "end", id: "missing", output: "ignored" },
+      { kind: "error", text: "failed" },
+    ];
+    writeFileSync(logPath, lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + '\n{"kind":"text","tex');
+    const res = singleResponse(await runPlugin(runtime, baseRequest("transcript", { log_path: logPath })));
+    assert.deepEqual(res, {
+      result: {
+        steps: [
+          { type: "text", text: "looking" },
+          { type: "tool", kind: "command", name: "Bash", summary: "ls -la", output: "total 0", status: "done", duration_ms: 750 },
+          { type: "tool", kind: "message", name: "send_message", summary: "hi", status: "running" },
+          { type: "error", text: "failed" },
+        ],
+      },
+    });
+  });
+
+  t("transcript of a missing log is an empty list", async () => {
+    const res = singleResponse(await runPlugin(runtime, baseRequest("transcript", { log_path: join(scratch, "absent.log") })));
+    assert.deepEqual(res, { result: { steps: [] } });
+  });
+
+  t("transcript failure becomes an error response", async () => {
+    const res = singleResponse(await runPlugin(runtime, { ...baseRequest("transcript", { log_path: join(scratch, "absent.log") }), config: { transcript: "boom" } }));
+    assert.deepEqual(res, { error: { message: "transcript failed" } });
+  });
+
+  t("transcript is an unknown method for an engine without it", async () => {
+    const res = singleResponse(await runPlugin(runtime, baseRequest("transcript", { log_path: join(scratch, "absent.log") }), noModelsFixture));
+    assert.deepEqual(res, { error: { message: 'unknown method "transcript"' } });
   });
 
   t("large unicode prompt survives byte for byte", async () => {

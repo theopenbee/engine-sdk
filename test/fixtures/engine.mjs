@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { runEngine, spawnCli, log } from "../../dist/index.js";
+import { runEngine, spawnCli, log, TranscriptBuilder, readJsonLines, stripMcpPrefix } from "../../dist/index.js";
 
 await runEngine({
   async check() {
@@ -48,5 +48,17 @@ await runEngine({
   async models(req) {
     if (req.config.models === "boom") throw new Error("listing failed");
     return [{ id: "fake/large", name: "Fake Large" }, { id: "fake/small" }];
+  },
+  async transcript(req) {
+    if (req.config.transcript === "boom") throw new Error("transcript failed");
+    const builder = new TranscriptBuilder();
+    for (const line of readJsonLines(req.params.log_path)) {
+      if (line.kind === "text") builder.text(line.text);
+      if (line.kind === "thinking") builder.thinking(line.text);
+      if (line.kind === "error") builder.error(line.text);
+      if (line.kind === "start") builder.toolStart(line.id, { kind: line.tool, name: stripMcpPrefix(line.name), summary: line.summary }, line.at);
+      if (line.kind === "end") builder.toolEnd(line.id, { output: line.output, isError: line.isError }, line.at);
+    }
+    return builder.steps();
   },
 });
