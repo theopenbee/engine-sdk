@@ -33,6 +33,47 @@ function clipOutput(output: string): string {
   return trimmed.slice(0, OUTPUT_HEAD) + OUTPUT_GAP + trimmed.slice(trimmed.length - OUTPUT_TAIL);
 }
 
+function truncateLine(line: string, max: number): string {
+  return line.length > max ? line.slice(0, max - 1) + "…" : line;
+}
+
+function takeLines(lines: string[], budget: number): string[] {
+  const taken: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    const next = length + line.length + (taken.length > 0 ? 1 : 0);
+    if (next > budget) {
+      break;
+    }
+    taken.push(line);
+    length = next;
+  }
+  return taken;
+}
+
+function clipDiff(diff: string): string {
+  const trimmed = diff.trimEnd();
+  if (trimmed.length <= MAX_OUTPUT) {
+    return trimmed;
+  }
+  const lines = trimmed.split("\n");
+  if (lines.length === 1) {
+    return truncateLine(trimmed, MAX_OUTPUT);
+  }
+  let head = takeLines(lines, OUTPUT_HEAD);
+  const consumed = head.length === 0 ? 1 : head.length;
+  if (head.length === 0) {
+    head = [truncateLine(lines[0], OUTPUT_HEAD)];
+  }
+  const rest = lines.slice(consumed);
+  let tail = takeLines([...rest].reverse(), OUTPUT_TAIL).reverse();
+  if (tail.length === 0) {
+    tail = [truncateLine(rest[rest.length - 1], OUTPUT_TAIL)];
+  }
+  const omitted = rest.length - tail.length;
+  return head.join("\n") + (omitted > 0 ? OUTPUT_GAP : "\n") + tail.join("\n");
+}
+
 function isBlank(text: string): boolean {
   return text.trim() === "";
 }
@@ -70,7 +111,7 @@ export class TranscriptBuilder {
     if (summary !== "") {
       step.summary = summary;
     }
-    const diff = tool.diff === undefined ? "" : clipOutput(tool.diff);
+    const diff = tool.diff === undefined ? "" : clipDiff(tool.diff);
     if (diff.trim() !== "") {
       step.diff = diff;
     }
@@ -89,7 +130,7 @@ export class TranscriptBuilder {
     if (output !== "") {
       step.output = output;
     }
-    const diff = result.diff === undefined ? "" : clipOutput(result.diff);
+    const diff = result.diff === undefined ? "" : clipDiff(result.diff);
     if (diff.trim() !== "") {
       step.diff = diff;
     }

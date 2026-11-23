@@ -183,14 +183,80 @@ test("a tool step without a diff has no diff field", () => {
   }
 });
 
-test("diff longer than 4000 characters keeps the head and the tail", () => {
-  const head = "+" + "h".repeat(999);
-  const tail = "-" + "t".repeat(2996);
+function numberedDiff(count) {
+  return Array.from({ length: count }, (_, i) => (i % 2 === 0 ? "+" : "-") + `line ${i} ` + "x".repeat(i % 37)).join("\n");
+}
+
+function clippedDiff(diff) {
   const b = new TranscriptBuilder();
-  b.toolStart("a", { kind: "edit", name: "Edit", diff: head + "m".repeat(5000) + tail });
-  const diff = b.steps()[0].diff;
-  assert.equal(diff.length, 4000);
-  assert.equal(diff, head + "\n…\n" + tail);
+  b.toolStart("a", { kind: "edit", name: "Edit", diff });
+  return b.steps()[0].diff;
+}
+
+test("a long diff keeps whole lines from the head and the tail around one gap line", () => {
+  const diff = numberedDiff(600);
+  const original = diff.split("\n");
+  const clipped = clippedDiff(diff);
+  assert.ok(clipped.length <= 4000);
+  const lines = clipped.split("\n");
+  assert.equal(lines.filter((line) => line === "…").length, 1);
+  const gap = lines.indexOf("…");
+  const head = lines.slice(0, gap);
+  const tail = lines.slice(gap + 1);
+  assert.ok(head.length > 0 && tail.length > 0);
+  assert.deepEqual(head, original.slice(0, head.length));
+  assert.deepEqual(tail, original.slice(original.length - tail.length));
+  assert.ok(head.join("\n").length <= 1000);
+  assert.ok(tail.join("\n").length <= 2997);
+  assert.ok(head.join("\n").length + 1 + original[head.length].length > 1000);
+  assert.ok(tail.join("\n").length + 1 + original[original.length - tail.length - 1].length > 2997);
+  for (const line of lines) {
+    assert.ok(line === "…" || /^[+\- ]/.test(line));
+  }
+});
+
+test("a long diff keeps the +N and -M counts of the kept lines intact", () => {
+  const clipped = clippedDiff(numberedDiff(600));
+  const lines = clipped.split("\n").filter((line) => line !== "…");
+  const added = lines.filter((line) => line.startsWith("+")).length;
+  const removed = lines.filter((line) => line.startsWith("-")).length;
+  assert.equal(added + removed, lines.length);
+});
+
+test("a long diff whose tail would start mid-line starts on a line boundary", () => {
+  const diff = "+head\n" + "+" + "m".repeat(5000) + "\n-" + "t".repeat(100) + "\n+end";
+  assert.equal(clippedDiff(diff), "+head\n…\n-" + "t".repeat(100) + "\n+end");
+});
+
+test("a short diff is untouched", () => {
+  const diff = " ctx\n-old\n+new";
+  assert.equal(clippedDiff(diff), diff);
+  assert.equal(clippedDiff(numberedDiff(10)), numberedDiff(10));
+});
+
+test("a single huge diff line is truncated on its own", () => {
+  const clipped = clippedDiff("+" + "h".repeat(9000));
+  assert.equal(clipped.length, 4000);
+  assert.equal(clipped, "+" + "h".repeat(3998) + "…");
+});
+
+test("a huge first line is cut to the head budget and the tail keeps whole lines", () => {
+  const diff = "+" + "h".repeat(4500) + "\n-a\n+b\n-c";
+  assert.equal(clippedDiff(diff), "+" + "h".repeat(998) + "…\n-a\n+b\n-c");
+});
+
+test("a huge last line is cut to the tail budget and keeps its start", () => {
+  const diff = "+a\n-b\n+" + "t".repeat(4000);
+  const clipped = clippedDiff(diff);
+  assert.equal(clipped, "+a\n-b\n+" + "t".repeat(2995) + "…");
+  assert.ok(clipped.length <= 4000);
+});
+
+test("huge lines on both ends leave one gap line between them", () => {
+  const diff = "+" + "h".repeat(3000) + "\n-skip1\n+skip2\n-" + "t".repeat(3000);
+  const clipped = clippedDiff(diff);
+  assert.equal(clipped, "+" + "h".repeat(998) + "…\n…\n-" + "t".repeat(2995) + "…");
+  assert.equal(clipped.length, 1000 + 3 + 2997);
 });
 
 test("diff of exactly 4000 characters is kept", () => {
@@ -235,13 +301,13 @@ test("a blank toolEnd diff keeps the diff from toolStart", () => {
   assert.equal("diff" in other, false);
 });
 
-test("toolEnd diff is clipped like output", () => {
-  const head = "+" + "h".repeat(999);
-  const tail = "-" + "t".repeat(2996);
+test("toolEnd diff is clipped on line boundaries", () => {
+  const diff = numberedDiff(600);
   const b = new TranscriptBuilder();
   b.toolStart("a", { kind: "edit", name: "edit" });
-  b.toolEnd("a", { diff: head + "m".repeat(5000) + tail });
-  assert.equal(b.steps()[0].diff, head + "\n…\n" + tail);
+  b.toolEnd("a", { diff });
+  assert.equal(b.steps()[0].diff, clippedDiff(diff));
+  assert.equal(b.steps()[0].diff.split("\n").filter((line) => line === "…").length, 1);
 });
 
 test("duration comes from the start and end timestamps", () => {
