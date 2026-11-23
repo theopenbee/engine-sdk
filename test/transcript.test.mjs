@@ -140,11 +140,13 @@ test("empty output leaves the output field out", () => {
 test("output longer than 4000 characters keeps the head and the tail", () => {
   const head = "h".repeat(1000);
   const middle = "m".repeat(5000);
-  const tail = "t".repeat(2999);
+  const tail = "t".repeat(2997);
   const b = new TranscriptBuilder();
   b.toolStart("a", { kind: "command", name: "Bash" });
   b.toolEnd("a", { output: head + middle + tail });
-  assert.equal(b.steps()[0].output, head + "\n…\n" + tail);
+  const output = b.steps()[0].output;
+  assert.equal(output.length, 4000);
+  assert.equal(output, head + "\n…\n" + tail);
 });
 
 test("output of exactly 4000 characters is kept", () => {
@@ -155,12 +157,14 @@ test("output of exactly 4000 characters is kept", () => {
   assert.equal(b.steps()[0].output, output);
 });
 
-test("output of 4001 characters is clipped", () => {
+test("output of 4001 characters is clipped to exactly 4000", () => {
   const output = "a".repeat(1000) + "b" + "c".repeat(3000);
   const b = new TranscriptBuilder();
   b.toolStart("a", { kind: "command", name: "Bash" });
   b.toolEnd("a", { output });
-  assert.equal(b.steps()[0].output, "a".repeat(1000) + "\n…\n" + "c".repeat(2999));
+  const clipped = b.steps()[0].output;
+  assert.equal(clipped.length, 4000);
+  assert.equal(clipped, "a".repeat(1000) + "\n…\n" + "c".repeat(2997));
 });
 
 test("duration comes from the start and end timestamps", () => {
@@ -271,6 +275,10 @@ test("readJsonLines returns an empty list for a missing file", () => {
   assert.deepEqual(readJsonLines(join(root, "missing.log")), []);
 });
 
+test("readJsonLines rethrows read errors other than a missing file", () => {
+  assert.throws(() => readJsonLines(root), (err) => err.code === "EISDIR");
+});
+
 test("readJsonLines returns an empty list for an empty file", () => {
   const path = join(root, "empty.log");
   writeFileSync(path, "");
@@ -287,6 +295,7 @@ test("stripMcpPrefix leaves other names alone", () => {
   assert.equal(stripMcpPrefix("Bash"), "Bash");
   assert.equal(stripMcpPrefix("send_message"), "send_message");
   assert.equal(stripMcpPrefix("mcp__noserver"), "mcp__noserver");
+  assert.equal(stripMcpPrefix("mcp__openbee__"), "mcp__openbee__");
   assert.equal(stripMcpPrefix("my_mcp__tool"), "my_mcp__tool");
   assert.equal(stripMcpPrefix(""), "");
 });

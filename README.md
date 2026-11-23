@@ -101,7 +101,7 @@ type TranscriptStep =
 |---|---|
 | `text` | `text`: assistant reply text; consecutive text merges with a blank line |
 | `thinking` | `text`: non-empty reasoning only |
-| `tool` | `kind` (`command`, `read`, `edit`, `search`, `web`, `message` or `other`), `name` (tool name without the `mcp__<server>__` prefix), `summary` (one line, at most 300 characters), `output` (at most 4000 characters: the first 1000, `\n…\n`, then the last 2999 when longer), `status` (`running`, `done` or `error`), `duration_ms` (only when both timestamps are known) |
+| `tool` | `kind` (`command`, `read`, `edit`, `search`, `web`, `message` or `other`), `name` (tool name without the `mcp__<server>__` prefix), `summary` (one line, at most 300 characters), `output` (at most 4000 characters: the first 1000, `\n…\n`, then the last 2997 when longer), `status` (`running`, `done` or `error`), `duration_ms` (only when both timestamps are known) |
 | `error` | `text` |
 
 `text` is at most 20000 characters. Skip lines that are not JSON (the log also holds stderr), skip a truncated last line, and skip events of nested sub-agents. `message` is the openbee `send_message` tool; its `summary` is the message content. A tool that has no result yet stays `running`.

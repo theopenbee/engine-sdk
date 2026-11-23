@@ -6,7 +6,7 @@ const MAX_TEXT = 20000;
 const MAX_SUMMARY = 300;
 const MAX_OUTPUT = 4000;
 const OUTPUT_HEAD = 1000;
-const OUTPUT_TAIL = 2999;
+const OUTPUT_TAIL = 2997;
 const OUTPUT_GAP = "\n…\n";
 
 type ToolStep = Extract<TranscriptStep, { type: "tool" }>;
