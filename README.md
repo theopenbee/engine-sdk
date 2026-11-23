@@ -123,6 +123,8 @@ runEngine({
 | `findCli(config, name)` | Returns `config.path` when it is set and exists, otherwise searches `PATH` (honouring `PATHEXT` on Windows). Throws `<path> not found` or `<name> not found on PATH`. |
 | `spawnCli(opts)` | Spawns the CLI in the plugin's process group, writes `input` to stdin and closes it, and appends stdout lines and stderr to `logPath` (created or truncated). `onStdoutLine` sees every stdout line before it is logged: return the text to log or `null` to drop it. Resolves with `{ code, signal, stderrTail }` where `stderrTail` is the last 4 KB of stderr. `opts.env` is merged over the plugin's environment; a key set to `undefined` is removed. |
 | `cliVersion(path, args?)` | Runs `<path> --version` (or `args`) with a 10 second timeout and returns the trimmed first line. |
+| `execCli(path, args, options, callback)` | `execFile` for a CLI found with `findCli`: same options and callback, with stdout and stderr as strings. Use it for every other CLI call, such as listing models or reading usage. |
+| `resolveCli(path)` | The command and leading arguments that start `path`. `spawnCli`, `cliVersion` and `execCli` use it, so plugins rarely need it. |
 | `log.info/warn/error(msg)` | Writes a line to stderr. |
 
 ## Process rules
@@ -132,6 +134,7 @@ runEngine({
 - **Never spawn the CLI detached.** openbee starts the plugin as its own process group and kills the whole group when a task is stopped or times out. A detached child, a `setsid` wrapper or a daemonised helper escapes that and is left running. `spawnCli` never detaches.
 - **Exit once you have answered.** `runEngine` exits with code 0 right after writing the response; a plugin that exits without a response, or non-zero, counts as failed.
 - **Stay portable.** Use `node:` built-ins only so the plugin runs on Node 20+ and on Bun.
+- **Start CLIs through the SDK on Windows.** npm installs CLIs on Windows as `.cmd` scripts, which Node cannot start without a shell, and a shell would interpret the prompt. `spawnCli`, `cliVersion` and `execCli` run such a script's JavaScript file with `node` instead, and a `.js` path the same way. A `.cmd` or `.bat` that is not an npm script fails with a message to set `path` to the CLI's `.exe` or `.js` file. Never call `execFile` or `spawn` on a path from `findCli` yourself, and never pass `shell: true`.
 
 ## Development
 

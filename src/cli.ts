@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import { accessSync, constants, createWriteStream, mkdirSync, statSync } from "node:fs";
-import { delimiter, dirname, extname, join } from "node:path";
+import type { ChildProcess, ExecFileException, ExecFileOptions } from "node:child_process";
+import { accessSync, constants, createWriteStream, mkdirSync, readFileSync, statSync } from "node:fs";
+import { basename, delimiter, dirname, extname, join, win32 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import { log } from "./main.js";
@@ -55,6 +56,84 @@ export function findCli(config: Record<string, unknown>, name: string): string {
   throw new Error(`${name} not found on PATH`);
 }
 
+export interface CliCommand {
+  command: string;
+  args: string[];
+}
+
+const SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
+const SHIM_TARGET = /"%~?dp0%?\\?([^"]*)"\s+%\*/g;
+const SHIM_FALLBACK_PROGRAM = /SET "_prog=([^"%]*)"/i;
+const SHIM_NODE_PROGRAM = /(?:^|[\s&"(])node(?:\.exe)?"?\s+"%~?dp0%?/im;
+
+function cmdShimTarget(content: string): string | undefined {
+  let target: string | undefined;
+  for (const match of content.matchAll(SHIM_TARGET)) target = match[1];
+  return target;
+}
+
+export function parseCmdShim(content: string, shimPath: string): { target: string; node: boolean } | undefined {
+  const relative = cmdShimTarget(content);
+  if (!relative) return undefined;
+  const target = win32.join(win32.dirname(shimPath), relative);
+  const fallback = SHIM_FALLBACK_PROGRAM.exec(content)?.[1];
+  if (fallback !== undefined) {
+    return fallback.toLowerCase() === "node" ? { target, node: true } : undefined;
+  }
+  if (SHIM_NODE_PROGRAM.test(content)) return { target, node: true };
+  const ext = win32.extname(target).toLowerCase();
+  if (SCRIPT_EXTENSIONS.has(ext)) return { target, node: true };
+  if (ext === ".exe" || ext === ".com") return { target, node: false };
+  return undefined;
+}
+
+function nodeFor(shimDir: string): string {
+  const local = join(shimDir, "node.exe");
+  if (isFile(local)) return local;
+  try {
+    return findCli({}, "node");
+  } catch {
+    if (/^node(\.exe)?$/i.test(basename(process.execPath))) return process.execPath;
+    throw new Error("node not found on PATH");
+  }
+}
+
+export function resolveCli(path: string, platform: NodeJS.Platform = process.platform): CliCommand {
+  if (platform !== "win32") return { command: path, args: [] };
+  const ext = extname(path).toLowerCase();
+  if (SCRIPT_EXTENSIONS.has(ext)) return { command: nodeFor(dirname(path)), args: [path] };
+  if (ext !== ".cmd" && ext !== ".bat") return { command: path, args: [] };
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch (err) {
+    throw new Error(`read ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const shim = parseCmdShim(content, path);
+  if (!shim) {
+    throw new Error(`${path} is a batch file that cannot be started safely; set the path setting to the CLI's .exe or .js file`);
+  }
+  return shim.node ? { command: nodeFor(dirname(path)), args: [shim.target] } : { command: shim.target, args: [] };
+}
+
+export function execCli(
+  path: string,
+  args: string[],
+  options: ExecFileOptions,
+  callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
+): ChildProcess | undefined {
+  let cli: CliCommand;
+  try {
+    cli = resolveCli(path);
+  } catch (err) {
+    callback(err as ExecFileException, "", "");
+    return undefined;
+  }
+  return execFile(cli.command, [...cli.args, ...args], { ...options, encoding: "utf8" }, (error, stdout, stderr) =>
+    callback(error, String(stdout), String(stderr)),
+  );
+}
+
 function lineSplitter(onLine: (line: string) => void) {
   const decoder = new StringDecoder("utf8");
   let pending = "";
@@ -98,7 +177,15 @@ export function spawnCli(opts: {
     logStream.on("error", (err) => log.warn(`writing ${opts.logPath} failed: ${err.message}`));
     const logClosed = new Promise<void>((done) => logStream.once("close", () => done()));
 
-    const child = spawn(opts.command, opts.args, {
+    let cli: CliCommand;
+    try {
+      cli = resolveCli(opts.command);
+    } catch (err) {
+      logStream.end();
+      void logClosed.then(() => reject(err));
+      return;
+    }
+    const child = spawn(cli.command, [...cli.args, ...opts.args], {
       cwd: opts.cwd,
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -162,7 +249,7 @@ function firstLine(text: string): string {
 export async function cliVersion(path: string, args: string[] = ["--version"]): Promise<string> {
   const command = [path, ...args].join(" ");
   return new Promise((resolve, reject) => {
-    execFile(
+    execCli(
       path,
       args,
       { timeout: VERSION_TIMEOUT_MS, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 1024 * 1024 },
